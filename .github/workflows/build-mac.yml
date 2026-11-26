@@ -23,11 +23,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-mac.txt
 
-      - name: Preparar FFmpeg y ffprobe (con todas sus librerías incluidas)
+      - name: Compilar FFmpeg propio (con subtitulos y x264) y empaquetar sus librerias
         run: |
-          brew install ffmpeg dylibbundler
+          brew install nasm pkg-config x264 libass freetype fribidi harfbuzz dylibbundler
+          curl -fsSL -o ffmpeg-src.tar.xz https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz
+          tar xf ffmpeg-src.tar.xz
+          cd ffmpeg-7.1
+          ./configure \
+            --enable-gpl --enable-libx264 --enable-libass --enable-libfreetype \
+            --disable-ffplay --disable-doc --disable-debug
+          make -j"$(sysctl -n hw.ncpu)"
+          cd ..
           mkdir -p build/bin
-          cp "$(brew --prefix)/bin/ffmpeg" "$(brew --prefix)/bin/ffprobe" build/bin/
+          cp ffmpeg-7.1/ffmpeg ffmpeg-7.1/ffprobe build/bin/
           chmod u+w build/bin/*
           dylibbundler -of -b -cd \
             -x build/bin/ffmpeg -x build/bin/ffprobe \
@@ -35,12 +43,20 @@ jobs:
           # Las modificaciones invalidan la firma: se firma de nuevo cada archivo
           find build/bin -type f \( -name "*.dylib" -o -name ffmpeg -o -name ffprobe \) \
             -exec codesign --force --sign - {} \;
-          echo "--- Comprobaciones ---"
-          if otool -L build/bin/ffmpeg build/bin/libs/*.dylib | grep -E "/opt/homebrew|/usr/local/(Cellar|opt)"; then
+
+      - name: Comprobar FFmpeg incluido
+        run: |
+          set +e
+          echo "--- Enlaces que deberian ser internos ---"
+          otool -L build/bin/ffmpeg | head -30
+          if otool -L build/bin/ffmpeg build/bin/ffprobe build/bin/libs/*.dylib | grep -E "/opt/homebrew|/usr/local/(Cellar|opt)"; then
             echo "ERROR: quedan enlaces a Homebrew"; exit 1
           fi
-          build/bin/ffmpeg -hide_banner -filters  | grep -w subtitles
-          build/bin/ffmpeg -hide_banner -encoders | grep -w libx264
+          build/bin/ffmpeg -hide_banner -version | head -3
+          build/bin/ffmpeg -hide_banner -version | grep -o -E "enable-lib(ass|x264)" | sort -u
+          build/bin/ffmpeg -hide_banner -filters  | grep -w subtitles || { echo "ERROR: falta el filtro subtitles"; exit 1; }
+          build/bin/ffmpeg -hide_banner -encoders | grep -w libx264   || { echo "ERROR: falta libx264"; exit 1; }
+          build/bin/ffprobe -version | head -1
           du -sh build/bin
 
       - name: Compilar la app
