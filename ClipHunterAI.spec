@@ -28,6 +28,7 @@ for pkg in ("faster_whisper", "ctranslate2", "onnxruntime", "av", "tokenizers",
 
 hiddenimports += collect_submodules("app")
 hiddenimports += ["scipy.ndimage", "scipy.signal", "scipy.special._cdflib"]
+hiddenimports += ["PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets", "PySide6.QtNetwork"]
 
 excludes = [
     "librosa", "numba", "llvmlite", "sklearn", "yaml", "matplotlib", "tkinter",
