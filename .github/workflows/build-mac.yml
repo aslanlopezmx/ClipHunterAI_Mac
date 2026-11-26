@@ -1,0 +1,72 @@
+name: Compilar ClipHunter AI para Mac
+
+on:
+  workflow_dispatch:        # botón "Run workflow" en GitHub
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: macos-15       # Mac con chip Apple Silicon (arm64), igual que la MacBook Neo
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-mac.txt
+
+      - name: Instalar dependencias de Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-mac.txt
+
+      - name: Preparar FFmpeg y ffprobe (con todas sus librerías incluidas)
+        run: |
+          brew install ffmpeg dylibbundler
+          mkdir -p build/bin
+          cp "$(brew --prefix)/bin/ffmpeg" "$(brew --prefix)/bin/ffprobe" build/bin/
+          chmod u+w build/bin/*
+          dylibbundler -of -b -cd \
+            -x build/bin/ffmpeg -x build/bin/ffprobe \
+            -d build/bin/libs -p @executable_path/libs/
+          # Las modificaciones invalidan la firma: se firma de nuevo cada archivo
+          find build/bin -type f \( -name "*.dylib" -o -name ffmpeg -o -name ffprobe \) \
+            -exec codesign --force --sign - {} \;
+          echo "--- Comprobaciones ---"
+          if otool -L build/bin/ffmpeg build/bin/libs/*.dylib | grep -E "/opt/homebrew|/usr/local/(Cellar|opt)"; then
+            echo "ERROR: quedan enlaces a Homebrew"; exit 1
+          fi
+          build/bin/ffmpeg -hide_banner -filters  | grep -w subtitles
+          build/bin/ffmpeg -hide_banner -encoders | grep -w libx264
+          du -sh build/bin
+
+      - name: Compilar la app
+        run: pyinstaller --noconfirm ClipHunterAI.spec
+
+      - name: Firmar la app (firma local, sin cuenta de Apple)
+        run: |
+          codesign --force --deep --sign - dist/ClipHunterAI.app
+          codesign --verify --deep --strict dist/ClipHunterAI.app
+
+      - name: Probar la app compilada (comprobación interna)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: dist/ClipHunterAI.app/Contents/MacOS/ClipHunterAI --selftest
+
+      - name: Crear el instalador .dmg
+        run: |
+          mkdir dmg
+          cp -R dist/ClipHunterAI.app dmg/
+          ln -s /Applications dmg/Applications
+          cp GUIA_PARA_MAC.md dmg/LEEME.txt
+          hdiutil create -volname "ClipHunter AI" -srcfolder dmg -ov -format UDZO ClipHunterAI-mac.dmg
+          ls -lh ClipHunterAI-mac.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClipHunterAI-mac
+          path: ClipHunterAI-mac.dmg
+          if-no-files-found: error

@@ -1,0 +1,15 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+cliphunter.db
+logs/
+cache/
+clips/
+videos/
+models/
+build/
+dist/
+dmg/
+*.dmg
+.DS_Store
